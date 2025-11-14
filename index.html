@@ -33,7 +33,7 @@
         const klines = hist.data.item;
         const close10 = klines[0][3];
         const close0 = klines[klines.length-1][3];
-        const return10d = (close10 - close0) / close0;
+        const return10d = (close10 - close0) / close0; 
 
         // 选股判断
         if (return10d <= 0.05 && open > 10) {
