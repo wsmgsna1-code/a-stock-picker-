@@ -1,47 +1,255 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="zh-CN">
 <head>
-  <title>短线王选股器</title>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial; text-align: center; margin: 50px; background: #f0f7ff; }
-    button { padding: 15px 30px; font-size: 18px; background: #00c853; color: white; border: none; cursor: pointer; border-radius: 8px; }
-    button:hover { background: #00a843; }
-    table { margin: 20px auto; border-collapse: collapse; background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    th, td { border: 1px solid #ddd; padding: 12px; }
-    th { background: #00c853; color: white; }
-  </style>
+<meta charset="utf-8">
+<title>短线王选股器（7 条黄金规则）</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{font-family: "Microsoft Yahei", Arial; background:#f4fbff; margin:12px; color:#222;}
+  .card{max-width:980px;margin:12px auto;padding:16px;background:#fff;border-radius:8px;box-shadow:0 8px 20px rgba(10,30,60,.06);}
+  h1{color:#00695c;margin:0 0 8px 0;}
+  .small{font-size:13px;color:#555}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;}
+  input,select,button{padding:8px;border-radius:6px;border:1px solid #dceff0;font-size:14px;}
+  button{background:#00c853;color:#fff;border:none;cursor:pointer;}
+  button[disabled]{opacity:.6}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{padding:8px;border:1px solid #eee;text-align:center;font-size:13px}
+  th{background:#e8fdf3;color:#00695c}
+  .log{max-height:160px;overflow:auto;background:#fafafa;padding:8px;border-radius:6px;border:1px dashed #e6f0ef;font-size:12px}
+  .ok{color:#00796b;font-weight:700}
+  .warn{color:#d84315;font-weight:700}
+</style>
 </head>
 <body>
-  <h1>短线王选股器（东方财富 永久免费）</h1>
-  <button onclick="fetchStock()">一键选股</button>
-  <div id="result" style="margin-top: 20px;">点击按钮开始选股...</div>
+  <div class="card">
+    <h1>短线王选股器 — 7 条黄金规则</h1>
+    <div class="small">规则：现价≥10；10日涨幅≤50%；10日均换手≥3%；市值≤500亿；近3日不全阴；今日放量阳线；不含 ST</div>
 
-  <script>
-    async function fetchStock() {
-      document.getElementById('result').innerHTML = '<p>正在拉取东方财富数据...</p>';
-      try {
-        // 东方财富免费接口（国内超稳）
-        const response = await fetch('https://push2.eastmoney.com/api/qt/stock/get?invt=2&fltt=2&fields=f43,f57,f58,f162,f46,f44,f45,f47,f48,f46&secid=1.600519');
-        const data = await response.json();
-        const stock = data.data;
-        
-        if (stock) {
-          document.getElementById('result').innerHTML = `
-            <h2 style="color: #00c853;">恭喜！选股成功！</h2>
-            <table>
-              <tr><th>代码</th><th>名称</th><th>现价</th><th>开盘</th><th>涨跌幅</th></tr>
-              <tr><td>600519</td><td>贵州茅台</td><td>${stock.f43}</td><td>${stock.f46}</td><td>${stock.f45}%</td></tr>
-            </table>
-            <p style="color: green; font-weight: bold;">东方财富国内最稳！120积分可用！</p>
-          `;
-        } else {
-          document.getElementById('result').innerHTML = '<p>未找到数据</p>';
-        }
-      } catch (e) {
-        document.getElementById('result').innerHTML = '<p style="color: red;">网络错误，点击重试</p>';
+    <div class="controls" style="margin-top:10px">
+      <label style="align-self:center">股票池 (secid，逗号分隔，示例：1.600519,0.000858)</label>
+      <input id="stocksInput" style="flex:1" value="1.600519,1.600036,0.000858,0.002594,1.601318,0.300750">
+      <select id="batchSize" title="每批并发请求数量">
+        <option value="5">每批 5 支（安全）</option>
+        <option value="10" selected>每批 10 支（平衡）</option>
+        <option value="30">每批 30 支（速度快）</option>
+      </select>
+      <button id="runBtn">一键选股</button>
+    </div>
+
+    <div id="status" class="small" style="margin-top:8px"></div>
+
+    <div id="output"></div>
+
+    <div style="margin-top:12px"><strong>调试日志：</strong></div>
+    <div id="log" class="log"></div>
+  </div>
+
+<script>
+/* 说明:
+   - 使用东方财富 push2 实时接口与 push2his 日线接口
+   - 我们尽量从返回字段中稳健解析：若某字段缺失，会在日志提示
+   - 若市值/换手率单位无法判定，请把日志贴给我，我会帮你锁定字段位置与单位
+*/
+
+// DOM
+const runBtn = document.getElementById('runBtn');
+const statusDiv = document.getElementById('status');
+const outputDiv = document.getElementById('output');
+const logDiv = document.getElementById('log');
+
+function log(...args){
+  const t = new Date().toLocaleTimeString();
+  logDiv.innerHTML += `<div>[${t}] ${args.join(' ')}</div>`;
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+function safeNum(v){ if (v===null||v===undefined) return NaN; const n=Number(String(v).replace(/[,，\s]/g,'')); return isFinite(n)?n:NaN; }
+
+// 实时接口（取现价/开盘/涨跌幅/代码/名称/可能的市值字段）
+async function fetchRealtime(secid){
+  const url = `https://push2.eastmoney.com/api/qt/stock/get?invt=2&fltt=2&fields=f43,f57,f58,f46,f45,f84&secid=${encodeURIComponent(secid)}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  return j.data || null;
+}
+// 日线接口 (最近 n 天)
+async function fetchKline(secid, n=10){
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${encodeURIComponent(secid)}&klt=101&fqt=1&lmt=${n}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  return j.data || null;
+}
+
+function parseKlineStr(s){
+  // 常见："2025-11-14,10.12,10.50,10.80,9.90,123456,1234567.89,0.68"
+  const p = s.split(',');
+  return {
+    date: p[0],
+    open: safeNum(p[1]),
+    close: safeNum(p[2]),
+    high: safeNum(p[3]),
+    low: safeNum(p[4]),
+    volume: safeNum(p[5]),        // 注意：单位可能为手或股
+    turnover: p.length>6?safeNum(p[6]):NaN,
+    raw: p
+  };
+}
+
+// 计算工具
+function calc10dReturn(closes){
+  if (!Array.isArray(closes) || closes.length < 10) return NaN;
+  const latest = closes[closes.length-1], earliest = closes[closes.length-10];
+  return ((latest - earliest) / Math.abs(earliest)) * 100;
+}
+function avg(arr){ const a=arr.filter(x=>!isNaN(x)); if(!a.length) return NaN; return a.reduce((s,v)=>s+v,0)/a.length; }
+
+// 判断近3日是否全阴（使用最近 4 个收盘判断 3 次比较）
+function is3DayAllDown(closes){
+  if (!Array.isArray(closes) || closes.length < 4) return false;
+  const last = closes.slice(-4);
+  return (last[1] < last[0]) && (last[2] < last[1]) && (last[3] < last[2]);
+}
+
+// 主流程
+runBtn.addEventListener('click', async () => {
+  outputDiv.innerHTML = '';
+  logDiv.innerHTML = '';
+  statusDiv.innerHTML = '开始选股...';
+  runBtn.disabled = true;
+
+  const raw = document.getElementById('stocksInput').value.trim();
+  const list = raw.split(',').map(s=>s.trim()).filter(Boolean);
+  const batchSize = parseInt(document.getElementById('batchSize').value,10) || 10;
+  const passed = [], filtered = [];
+
+  for (let i=0; i<list.length; i+=batchSize){
+    const batch = list.slice(i, i+batchSize);
+    statusDiv.innerHTML = `处理 ${i+1}-${i+batch.length} / ${list.length} ...`;
+
+    // 并行请求
+    const reals = await Promise.all(batch.map(s => fetchRealtime(s).catch(e=>{ log('实时错误',s,e); return null; })));
+    const kds = await Promise.all(batch.map(s => fetchKline(s, 10).catch(e=>{ log('K线错误',s,e); return null; })));
+
+    for (let j=0; j<batch.length; j++){
+      const secid = batch[j];
+      const rt = reals[j];
+      const kd = kds[j];
+
+      if (!rt){ log(`跳过 ${secid}：实时无数据`); filtered.push({secid, reason:'实时无数据'}); continue; }
+      if (!kd || !Array.isArray(kd.klines) || kd.klines.length===0){ log(`跳过 ${secid}：历史K线无数据`); filtered.push({secid, reason:'历史K线无数据'}); continue; }
+
+      // 解析实时
+      const code = rt.f57 || rt.f12 || '未知';
+      const name = rt.f58 || rt.f14 || '未知';
+      // f43 可能是现价*100 或直接小数
+      let price = safeNum(rt.f43);
+      if (price > 1000) price = price/100;
+      let open = safeNum(rt.f46);
+      if (open > 1000) open = open/100;
+      const pct = safeNum(rt.f45); // 直接百分比字段
+      // 尝试解析市值（原始值记录）
+      const marketCandidates = ['f84','f116','f20','f62'];
+      let marketRaw = NaN;
+      for (const k of marketCandidates){ if (rt[k] !== undefined && rt[k] !== null){ const v=safeNum(rt[k]); if(!isNaN(v)){ marketRaw = v; break; } } }
+
+      // 解析 K 线
+      const klines = kd.klines.map(parseKlineStr);
+      const closes = klines.map(x=>x.close).filter(x=>!isNaN(x));
+      const vols = klines.map(x=>x.volume).filter(x=>!isNaN(x));
+      const turnovers = klines.map(x=>x.turnover).filter(x=>!isNaN(x));
+
+      // 计算指标
+      const tenReturn = calc10dReturn(closes); // %
+      const tenAvgTurnover = avg(turnovers); // 可能是换手或成交额，视接口字段而定
+      const avg5Vol = avg(vols.slice(-5));
+      const todayVol = vols[vols.length-1];
+      const yesterdayVol = vols.length>=2 ? vols[vols.length-2] : NaN;
+
+      // 逐条严格判断（只要关键字段缺失就视为不通过）
+      const reasons = [];
+
+      // ST 过滤
+      if (typeof name === 'string' && name.toUpperCase().includes('ST')) { reasons.push('ST 股票'); }
+
+      // 条件1: 现价 >= 10
+      if (isNaN(price)){ reasons.push('现价缺失'); }
+      else if (price < 10){ reasons.push(`现价 ${price} < 10`); }
+
+      // 条件2: 10日涨幅 <=50%
+      if (isNaN(tenReturn)){ reasons.push('10日涨幅缺失'); }
+      else if (tenReturn > 50){ reasons.push(`10日涨幅 ${tenReturn.toFixed(2)}% > 50%`); }
+
+      // 条件3: 10日平均换手率 >=3%
+      if (isNaN(tenAvgTurnover)){ reasons.push('10日换手率缺失'); }
+      else if (tenAvgTurnover < 3){ reasons.push(`10日均换手 ${tenAvgTurnover.toFixed(2)} < 3`); }
+
+      // 条件4: 市值 <= 500 亿 (注意：marketRaw 单位需通过日志确认)
+      if (isNaN(marketRaw)){ reasons.push('市值字段缺失'); }
+      else if (marketRaw > 500){ reasons.push(`市值 ${marketRaw} 超过 500`); }
+
+      // 条件5: 近3日不全阴
+      if (is3DayAllDown(closes)){ reasons.push('近3日全为下跌'); }
+
+      // 条件6: 今日放量阳线（量 >= 昨日量 && 今日收盘 >= 今日开盘）
+      // 我们用 klines 中最新的 close/open
+      const latest = klines[klines.length-1];
+      const prev = klines.length>=2 ? klines[klines.length-2] : null;
+      if (!latest || isNaN(latest.close) || isNaN(latest.open)){ reasons.push('当日开收盘数据缺失'); }
+      else {
+        if (!(latest.close >= latest.open)) reasons.push('今日非阳线');
+        if (isNaN(prev) || isNaN(prev.volume)){ reasons.push('昨日成交量缺失'); }
+        else if (isNaN(latest.volume) || latest.volume < prev.volume){ reasons.push('今日未放量 (今日量 < 昨日量)'); }
       }
-    }
-  </script>
+
+      // 汇总
+      if (reasons.length === 0){
+        passed.push({
+          secid, code, name, price, open, pct,
+          tenReturn: isNaN(tenReturn)?null:tenReturn,
+          tenAvgTurnover: isNaN(tenAvgTurnover)?null:tenAvgTurnover,
+          marketRaw, todayVol, avg5Vol
+        });
+        log(`通过 ${secid} ${code} ${name}`);
+      } else {
+        filtered.push({secid, code, name, reasons});
+        log(`过滤 ${secid} ${code} ${name}：${reasons.join('； ')}`);
+      }
+    } // end for batch
+
+    // 礼貌停顿，避免接口限速
+    await new Promise(r => setTimeout(r, 400));
+  } // end batches
+
+  runBtn.disabled = false;
+  statusDiv.innerHTML = `<span class="ok">完成 — 符合条件：${passed.length} 支；被过滤/缺失：${filtered.length} 支（日志见下方）</span>`;
+
+  // 渲染通过结果
+  if (passed.length === 0){
+    outputDiv.innerHTML = `<div class="warn">未找到符合全部条件的股票（严格模式）。</div>
+      <div style="margin-top:8px"><strong>被过滤示例（前20项）：</strong></div>
+      <pre style="font-size:12px;max-height:280px;overflow:auto;border:1px solid #eee;padding:8px;">${JSON.stringify(filtered.slice(0,20), null, 2)}</pre>`;
+    return;
+  }
+
+  let html = `<div style="margin-top:10px"><strong>找到 ${passed.length} 支符合条件（展示前 ${passed.length} 支）</strong></div>`;
+  html += `<table><thead><tr><th>secid</th><th>代码</th><th>名称</th><th>现价</th><th>开盘</th><th>10日涨幅(%)</th><th>10日均换手</th><th>市值(原始)</th></tr></thead><tbody>`;
+  for (const p of passed){
+    html += `<tr>
+      <td>${p.secid}</td>
+      <td>${p.code}</td>
+      <td>${p.name}</td>
+      <td>${p.price? p.price.toFixed(2) : '--'}</td>
+      <td>${p.open && !isNaN(p.open) ? p.open.toFixed(2) : '--'}</td>
+      <td>${p.tenReturn!==null? p.tenReturn.toFixed(2) : '--'}</td>
+      <td>${p.tenAvgTurnover!==null? p.tenAvgTurnover.toFixed(2) : '--'}</td>
+      <td>${p.marketRaw!==undefined? p.marketRaw : '--'}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  outputDiv.innerHTML = html;
+
+  log('说明：市值与换手率字段单位可能有差异。如日志中看到“市值字段缺失”或数值异常，请截图/粘贴日志给我，我帮你锁定字段与单位。');
+});
+</script>
 </body>
 </html>
