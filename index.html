@@ -4,36 +4,36 @@
   <title>短线王选股器</title>
   <meta charset="utf-8">
   <style>
-    body { font-family: Arial; text-align: center; margin: 50px; background: #f9f9f9; }
-    button { padding: 15px 30px; font-size: 18px; background: #1976d2; color: white; border: none; cursor: pointer; border-radius: 8px; }
-    button:hover { background: #0d47a1; }
+    body { font-family: Arial; text-align: center; margin: 50px; background: #f0f7ff; }
+    button { padding: 15px 30px; font-size: 18px; background: #00c853; color: white; border: none; cursor: pointer; border-radius: 8px; }
+    button:hover { background: #00a843; }
     table { margin: 20px auto; border-collapse: collapse; background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
     th, td { border: 1px solid #ddd; padding: 12px; }
-    th { background: #1976d2; color: white; }
+    th { background: #00c853; color: white; }
   </style>
 </head>
 <body>
-  <h1>短线王选股器（Yahoo Finance 永久免费）</h1>
+  <h1>短线王选股器（东方财富 永久免费）</h1>
   <button onclick="fetchStock()">一键选股</button>
   <div id="result" style="margin-top: 20px;">点击按钮开始选股...</div>
 
   <script>
     async function fetchStock() {
-      document.getElementById('result').innerHTML = '<p>正在拉取 Yahoo Finance 数据...</p>';
+      document.getElementById('result').innerHTML = '<p>正在拉取东方财富数据...</p>';
       try {
-        // 使用免费 CDN 代理 yfinance 数据
-        const response = await fetch('https://query1.finance.yahoo.com/v7/finance/quote?symbols=600519.SS');
+        // 东方财富免费接口（国内超稳）
+        const response = await fetch('https://push2.eastmoney.com/api/qt/stock/get?invt=2&fltt=2&fields=f43,f57,f58,f162,f46,f44,f45,f47,f48,f46&secid=1.600519');
         const data = await response.json();
-        const stock = data.quoteResponse.result[0];
+        const stock = data.data;
         
         if (stock) {
           document.getElementById('result').innerHTML = `
-            <h2 style="color: #1976d2;">恭喜！选股成功！</h2>
+            <h2 style="color: #00c853;">恭喜！选股成功！</h2>
             <table>
               <tr><th>代码</th><th>名称</th><th>现价</th><th>开盘</th><th>涨跌幅</th></tr>
-              <tr><td>600519</td><td>贵州茅台</td><td>${stock.regularMarketPrice.toFixed(2)}</td><td>${stock.regularMarketOpen.toFixed(2)}</td><td>${stock.regularMarketChangePercent.toFixed(2)}%</td></tr>
+              <tr><td>600519</td><td>贵州茅台</td><td>${stock.f43}</td><td>${stock.f46}</td><td>${stock.f45}%</td></tr>
             </table>
-            <p style="color: green; font-weight: bold;">Yahoo Finance 永久免费！120积分可用！</p>
+            <p style="color: green; font-weight: bold;">东方财富国内最稳！120积分可用！</p>
           `;
         } else {
           document.getElementById('result').innerHTML = '<p>未找到数据</p>';
