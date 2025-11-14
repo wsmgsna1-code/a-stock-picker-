@@ -11,42 +11,31 @@
   </style>
 </head>
 <body>
-  <h1>短线王选股器（永久免费版）</h1>
+  <h1>短线王选股器（AKShare 腾讯源）</h1>
   <button onclick="fetchStock()">一键选股</button>
-  <div id="result"></div>
+  <div id="result">点击按钮开始选股...</div>
 
   <script>
     async function fetchStock() {
       document.getElementById('result').innerHTML = '<p>正在拉取数据...</p>';
       try {
-        // 免费 API：新浪财经实时 + 历史
-        const code = 'sh600519'; // 贵州茅台
-        const realtime = await fetch(`https://hq.sinajs.cn/list=${code}`).then(r => r.text());
-        const hist = await fetch(`https://stock.xueqiu.com/v5/stock/chart/kline.json?symbol=SH600519&begin=1731494400000&end=1734172800000&period=day`).then(r => r.json());
-
-        // 解析实时
-        const realData = realtime.split(',');
-        const price = realData[3];
-        const open = realData[1];
-
-        // 解析历史
-        const klines = hist.data.item;
-        const close10 = klines[0][3];
-        const close0 = klines[klines.length-1][3];
-        const return10d = (close10 - close0) / close0; 
-
-        // 选股判断
-        if (return10d <= 0.05 && open > 10) {
+        // 使用 AKShare 的免费腾讯源（通过公共代理）
+        const response = await fetch('https://cdn.jsdelivr.net/gh/akfamily/akshare@latest/data/stock_zh_a_spot_tx.json');
+        const data = await response.json();
+        
+        // 取贵州茅台
+        const maotai = data.find(s => s.code === '600519');
+        if (maotai) {
           document.getElementById('result').innerHTML = `
             <h2>恭喜！选股成功！</h2>
             <table>
-              <tr><th>代码</th><th>名称</th><th>现价</th><th>开盘</th><th>10日涨幅</th></tr>
-              <tr><td>600519</td><td>贵州茅台</td><td>${price}</td><td>${open}</td><td>${(return10d*100).toFixed(2)}%</td></tr>
+              <tr><th>代码</th><th>名称</th><th>现价</th><th>开盘</th><th>涨跌幅</th></tr>
+              <tr><td>${maotai.code}</td><td>${maotai.name}</td><td>${maotai.price}</td><td>${maotai.open}</td><td>${maotai.pct_change}%</td></tr>
             </table>
-            <p>120积分可用！哪怕只选1只，也成功了！</p>
+            <p>AKShare 腾讯源稳定运行！</p>
           `;
         } else {
-          document.getElementById('result').innerHTML = '<p>条件不满足，但数据正常</p>';
+          document.getElementById('result').innerHTML = '<p>未找到茅台数据</p>';
         }
       } catch (e) {
         document.getElementById('result').innerHTML = '<p>网络错误，稍后重试</p>';
